@@ -8,6 +8,9 @@ on:
       - ".github/workflows/main.yml"
       - "air_control_source.tar.gz"
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -46,6 +49,13 @@ jobs:
           grep -n -E "^e: |error:|Error:|FAILED|What went wrong|Exception|Could not|Unresolved|Execution failed|AssertionError" build.log | head -40 | while IFS= read -r l; do echo "::error::${l:0:400}"; done
           echo "::error::LAST LINES: $(tail -n 25 build.log | tr '\n' '|' | cut -c1-1200)"
 
+      - name: Report APK facts
+        run: |
+          for a in dist/*.apk; do echo "::notice::$(basename $a) $(stat -c %s $a) bytes"; done
+          AAPT=$(ls $ANDROID_HOME/build-tools/*/aapt | tail -1)
+          $AAPT dump badging dist/air_control-release.apk | grep -E "^package|sdkVersion:|targetSdkVersion|uses-permission" | while IFS= read -r l; do echo "::notice::$l"; done
+          unzip -l dist/air_control-release.apk | grep -E "hand_landmarker|libmediapipe|classes" | while IFS= read -r l; do echo "::notice::apk-content: $l"; done
+
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
@@ -60,3 +70,11 @@ jobs:
           name: build-log
           path: build.log
           if-no-files-found: ignore
+
+      - name: Publish release with APKs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v1.0.0-build${{ github.run_number }}"
+          gh release create "$TAG" dist/*.apk --title "Air Control $TAG" \
+            --notes "Debug and release (debug-signed) arm64 APKs. Untested on a real device." 
