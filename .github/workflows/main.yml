@@ -2,17 +2,24 @@ name: Build Air Control APK
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/main.yml"
+      - "air_control_source.tar.gz"
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
       - name: Extract source archive
         run: |
           tar -xzf air_control_source.tar.gz
+          # the archive lost executable bits
+          chmod +x android/gradlew tools/build.sh
           ls -la
 
       - uses: actions/setup-java@v4
@@ -29,7 +36,15 @@ jobs:
         run: yes | flutter doctor --android-licenses || true
 
       - name: Build APKs
-        run: bash tools/build.sh
+        run: |
+          set -o pipefail
+          bash tools/build.sh 2>&1 | tee build.log
+
+      - name: Surface errors as annotations
+        if: failure()
+        run: |
+          grep -n -E "^e: |error:|Error:|FAILED|What went wrong|Exception|Could not|Unresolved|Execution failed|AssertionError" build.log | head -40 | while IFS= read -r l; do echo "::error::${l:0:400}"; done
+          echo "::error::LAST LINES: $(tail -n 25 build.log | tr '\n' '|' | cut -c1-1200)"
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4
@@ -37,3 +52,11 @@ jobs:
           name: air-control-apks
           path: dist/*.apk
           if-no-files-found: error
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: ignore
